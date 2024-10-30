@@ -1,92 +1,117 @@
 import pybullet as p
 import time
+import pybullet_data
+import numpy as np
+import random
 
-# setting some constants for our robot's movements
-turn_speed = 2      # speed when turning
-forward_speed = 3   # speed when moving forward
-obstacle_distance = 1.0  # distance threshold for detecting obstacles
+# Start the PyBullet simulation with GUI
+p.connect(p.GUI)
 
-# let's set up our simulation environment
-def setup_simulation():
-    print("setting up the simulation environment...")
-    physics_client = p.connect(p.GUI)  # connect to the gui
-    p.setGravity(0, 0, -9.8)  # adding gravity to our world
-    plane_id = p.loadURDF("plane.urdf")  # load the ground
-    robot_id = p.loadURDF("r2d2.urdf", [0, 0, 0.1])  # load our cute robot above the ground
+p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
-    # placing some obstacles around for our robot to avoid
-    print("adding obstacles...")
-    obstacles = [
-        p.loadURDF("cube.urdf", [1, 0, 0.5], globalScaling=0.5),
-        p.loadURDF("cube.urdf", [2, 1, 0.5], globalScaling=0.5),
-        p.loadURDF("cube.urdf", [3, -1, 0.5], globalScaling=0.5)
-    ]
-    
-    return robot_id  # we return the robot id for later use
+# Set gravity and load the ground plane
+p.setGravity(0, 0, -9.81)
+p.loadURDF("plane.urdf")
 
-# function to control how fast our robot moves
-def set_velocity(robot_id, left_speed, right_speed):
-    print(f"setting velocities - left: {left_speed}, right: {right_speed}")
-    p.setJointMotorControl2(robot_id, 0, p.VELOCITY_CONTROL, targetVelocity=left_speed)
-    p.setJointMotorControl2(robot_id, 1, p.VELOCITY_CONTROL, targetVelocity=right_speed)
+# Load the Husky robot model
+robot_id = p.loadURDF("husky/husky.urdf", basePosition=[0, 0, 0], useFixedBase=False)
 
-# function to check for obstacles in front of our robot
-def get_distances(robot_id):
-    print("checking for obstacles...")
-    directions = {
-        "left": (-0.5, 0),  # position for checking left
-        "front": (1, 0),    # position for checking front
-        "right": (0.5, 0)   # position for checking right
-    }
-    distances = {}  # we'll store distances here
-    robot_position = p.getBasePositionAndOrientation(robot_id)[0]  # get robot's current position
-    
-    # loop through each direction to see if there's an obstacle
-    for direction, (dx, dy) in directions.items():
-        ray_end = [robot_position[0] + dx, robot_position[1] + dy, robot_position[2]]  # where the ray ends
-        result = p.rayTest(robot_position, ray_end)[0]  # cast the ray
-        distance = result[2] if result[0] != -1 else float('inf')  # get distance or 'inf' if no obstacle
-        distances[direction] = distance  # store the distance for this direction
-    
-    return distances  # return all distances found
+# Husky's wheel joint indices
+wheel_joints = [2, 3, 4, 5]  # These are the four wheels
 
-# deciding how our robot should move based on detected obstacles
-def decide_and_move(robot_id, distances):
-    print("deciding movement based on detected obstacles...")
-    if distances["front"] < obstacle_distance:  # if something's in front
-        print("obstacle detected in front!")
-        if distances["left"] > distances["right"]:  # check which side is clearer
-            turn_left(robot_id)  # turn left if it's clearer
-        else:
-            turn_right(robot_id)  # otherwise, turn right
-    else:
-        print("path is clear, moving forward!")
-        move_forward(robot_id)  # no obstacles, so go forward
+# Load cubes: one in the way and two at random locations
+cube_height = 0.1
+cubes = []
 
-# helper functions to handle different robot movements
-def move_forward(robot_id):
-    set_velocity(robot_id, forward_speed, forward_speed)  # both wheels move forward
+# Function to calculate distance between two positions
+def calculate_distance(pos1, pos2):
+    return np.linalg.norm(np.array(pos1) - np.array(pos2))
 
-def turn_left(robot_id):
-    set_velocity(robot_id, turn_speed, -turn_speed)  # left wheel goes forward, right wheel goes backward
+# Fixed position of the cube in the way
+blocking_cube_pos = [6, 0, cube_height]  # Directly in the path of the rover
+cubes.append(p.loadURDF("cube.urdf", basePosition=blocking_cube_pos, useFixedBase=False))
 
-def turn_right(robot_id):
-    set_velocity(robot_id, -turn_speed, turn_speed)  # right wheel goes forward, left wheel goes backward
+# Generate two additional cubes at random positions, ensuring they are at least 6 units away
+for _ in range(2):
+    while True:
+        # Generate random positions
+        x_pos = random.uniform(10, 16)  # Ensure cubes are beyond 6 units from the origin
+        y_pos = random.uniform(-2, 2)    # Random y position between -2 and 2
+        if calculate_distance([0, 0, 0], [x_pos, y_pos, cube_height]) > 6:  # Check distance
+            cubes.append(p.loadURDF("cube.urdf", basePosition=[x_pos, y_pos, cube_height], useFixedBase=False))
+            break
 
-# main loop to run the simulation
-def main():
-    robot_id = setup_simulation()  # get our robot ready in the environment
-    try:
-        print("starting the simulation...")
-        for step in range(1000):  # run the simulation for a set number of steps
-            distances = get_distances(robot_id)  # check for obstacles
-            decide_and_move(robot_id, distances)  # make a decision on movement
-            p.stepSimulation()  # move the simulation forward
-            time.sleep(0.01)  # pause a moment for smooth movement
-    finally:
-        print("disconnecting from simulation...")
-        p.disconnect()  # make sure to disconnect cleanly
+# Set the mass and friction properties of the cubes
+for cube_id in cubes:
+    p.changeDynamics(cube_id, -1, mass=10.0)  # Set mass to a larger value
+    p.changeDynamics(cube_id, -1, lateralFriction=1.0, spinningFriction=1.0, rollingFriction=1.0)
 
-# let's run the main function if this script is executed
-if __name__ == "__main__":
-    main()
+# Define detection parameters and control constants
+detection_distance = 2.0  # Set detection distance to 2
+FORWARD_VELOCITY = 3.0     # Set speed of the robot to normal (3.0)
+BACKWARD_VELOCITY = -3.0
+TURN_VELOCITY = 8.0        # Set turning velocity to 8.0 for faster turns
+TURN_TIME = 0.1            # Set turn time to 0.1 seconds for quicker turns
+
+# Avoid an obstacle
+def avoid_obstacle(robot_id):
+    # Move backward
+    for joint in wheel_joints:
+        p.setJointMotorControl2(robot_id, joint, p.VELOCITY_CONTROL, targetVelocity=BACKWARD_VELOCITY)
+    time.sleep(0.5)  # Back up for half a second
+
+    # Turn right (rotate wheels in opposite directions)
+    for joint in wheel_joints[:2]:  # Front wheels
+        p.setJointMotorControl2(robot_id, joint, p.VELOCITY_CONTROL, targetVelocity=TURN_VELOCITY)
+    for joint in wheel_joints[2:]:  # Back wheels
+        p.setJointMotorControl2(robot_id, joint, p.VELOCITY_CONTROL, targetVelocity=-TURN_VELOCITY)
+    time.sleep(TURN_TIME)
+
+    # Move forward after turning
+    for joint in wheel_joints:
+        p.setJointMotorControl2(robot_id, joint, p.VELOCITY_CONTROL, targetVelocity=FORWARD_VELOCITY)
+
+# Set the total simulation time (in seconds)
+total_simulation_time = 30  # Run for 30 seconds
+start_time = time.time()
+
+# Main simulation loop
+try:
+    while True:
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+
+        if elapsed_time > total_simulation_time:
+            print("Simulation time completed.")
+            break  # Exit the loop after 30 seconds
+
+        p.stepSimulation()
+        robot_pos, _ = p.getBasePositionAndOrientation(robot_id)
+
+        # Check for detected obstacles
+        obstacle_detected = False
+        for cube_id in cubes:
+            cube_pos, _ = p.getBasePositionAndOrientation(cube_id)
+            distance = calculate_distance(robot_pos, cube_pos)
+
+            # If the robot is within detection distance, avoid the obstacle
+            if distance < detection_distance:
+                print("Obstacle detected! Avoiding obstacle.")
+                avoid_obstacle(robot_id)
+                obstacle_detected = True
+                break  # Avoid multiple detections in one loop
+
+        # If no obstacles are detected, continue moving forward
+        if not obstacle_detected:
+            for joint in wheel_joints:
+                p.setJointMotorControl2(robot_id, joint, p.VELOCITY_CONTROL, targetVelocity=FORWARD_VELOCITY)
+
+        time.sleep(1 / 240)  # Adjusted render time
+
+except KeyboardInterrupt:
+    print("Simulation ended by user.")
+    p.disconnect()
+
+except Exception as e:
+    print(f"An error occurred: {e}")
+    p.disconnect()

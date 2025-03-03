@@ -1,4 +1,5 @@
 **Obstacle Avoidance Robot**
+
 This project sets up a simple robot that moves on its own in a virtual space, trying its best to avoid bumping into things/people. 
 It uses some basic “sensors” to check for obstacles in front, left, and right.
 When it spots something in its way, it decides to turn left or right depending on which side looks clearer; if the coast is clear, it keeps moving forward.
